@@ -9,7 +9,7 @@ plotly
 argparse
 ```
 ## results
-![image](./example.pdf)
+![image](./example.png)
 
 # `maf2paf.py`
 `maf2paf.py` converts [MAF](http://last.cbrc.jp/doc/last-tutorial.html) format to [PAF](https://github.com/lh3/miniasm/blob/master/PAF.md) format.
