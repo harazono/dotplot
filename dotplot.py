@@ -52,12 +52,12 @@ def minimap2_paf_parser(filename:str, dsc = None):
 	return paf
 
 
-def draw_dotplot(PAFs):
+def draw_dotplot(PAFs, query_centromere_breakpoint = None, reference_centromere_breakpoint = None):
 	retObj = go.Figure()
 	counter = 0
 	# # 63 6E FA -> rgba(99, 110, 250, 0.7)
 	colorList = []
-	for each_color in px.colors.qualitative.Plotly:
+	for each_color in px.colors.qualitative.Dark24:
 		r_str = each_color[1:3]
 		g_str = each_color[3:5]
 		b_str = each_color[5:7]
@@ -84,24 +84,31 @@ def draw_dotplot(PAFs):
 				y_points.append(one_alignment.ref_start)
 				y_points.append(one_alignment.ref_end)
 				y_points.append(None)
-		retObj.add_trace(go.Scattergl(x = x_points, y = y_points, line=dict(width=2, color=colorList[counter]), mode='lines', name = paf[0].dsc)) #, color=one_alignment.color
+		retObj.add_trace(go.Scattergl(x = x_points, y = y_points, line=dict(width=3, color=colorList[counter]), mode='lines', name = paf[0].dsc)) #, color=one_alignment.color
+		if query_centromere_breakpoint:
+			retObj.add_vrect(x0 = query_centromere_breakpoint[0], x1 = query_centromere_breakpoint[1], fillcolor = px.colors.qualitative.Pastel[0], opacity = 0.3, layer = "below", line_width=0)
+		if reference_centromere_breakpoint:
+			retObj.add_vrect(y0 = reference_centromere_breakpoint[0], y1 = reference_centromere_breakpoint[1], fillcolor = px.colors.qualitative.Pastel[1], opacity = 0.3, layer = "below", line_width=0)
 		counter += 1
-	retObj.update_xaxes(title_text='Query')
-	retObj.update_yaxes(title_text='Reference')
+	retObj.update_xaxes(title_text='Query', rangemode = 'tozero')
+	retObj.update_yaxes(title_text='Reference', rangemode = 'tozero')
 	return retObj
 
 def main():
 	parser = argparse.ArgumentParser(description='Describe dot plot of alignments in PAF files. Alignments are grouped by PAF file name. This script will show dot plot on your browser and save a picture to the file which you specify.')
 	parser.add_argument("Outputfilename", metavar='FileName', type=str, help='image file name.File name must be like fizz.png or fizz.svn. Please refer to https://plotly.com/python/static-image-export/')
 	parser.add_argument("PAFfilename", metavar='PAF', type=str, nargs='+', help='PAF file(s)')
+	parser.add_argument("--qc", metavar='Query centromere', type=str, nargs=2, help='query centromere coordinates')
 	args = parser.parse_args()
 	paf_file_names = args.PAFfilename
 	out_file_name = args.Outputfilename
+	query_centromere_breakpoint = args.qc
 	paf_instance_array = []
 	for each_filename in paf_file_names:
 		tmp_paf_instance = minimap2_paf_parser(each_filename, dsc = each_filename)
 		paf_instance_array.append(tmp_paf_instance)
-	fig = draw_dotplot(paf_instance_array)
+
+	fig = draw_dotplot(paf_instance_array, query_centromere_breakpoint = query_centromere_breakpoint, reference_centromere_breakpoint = None)
 	fig.show()
 	fig.write_image(out_file_name)
 
