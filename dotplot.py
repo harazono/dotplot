@@ -3,6 +3,7 @@
 import csv
 import plotly.graph_objects as go
 import plotly.express as px
+import plotly.io as pio
 import argparse
 
 class pafData():
@@ -51,8 +52,32 @@ def minimap2_paf_parser(filename:str, dsc = None):
 		pass
 	return paf
 
+GRCh38_chromosome_length = {
+							1: 248956422,
+							2: 242193529,
+							3: 198295559,
+							4: 190214555,
+							5: 181538259,
+							6: 170805979,
+							7: 159345973,
+							8: 145138636,
+							9: 138394717,
+							10: 133797422,
+							11: 135086622,
+							12: 133275309,
+							13: 114364328,
+							14: 107043718,
+							15: 101991189,
+							16: 90338345,
+							17: 83257441,
+							18: 80373285,
+							19: 58617616,
+							20: 64444167,
+							21: 46709983,
+							22: 50818468
+}
 
-def draw_dotplot(PAFs, query_centromere_breakpoint = None, reference_centromere_breakpoint = None):
+def draw_dotplot(PAFs, query_centromere_breakpoint = None, reference_centromere_breakpoint = None, chrm = None):
 	retObj = go.Figure()
 	counter = 0
 	# # 63 6E FA -> rgba(99, 110, 250, 0.7)
@@ -90,26 +115,35 @@ def draw_dotplot(PAFs, query_centromere_breakpoint = None, reference_centromere_
 		if reference_centromere_breakpoint:
 			retObj.add_vrect(y0 = reference_centromere_breakpoint[0], y1 = reference_centromere_breakpoint[1], fillcolor = px.colors.qualitative.Pastel[1], opacity = 0.3, layer = "below", line_width=0)
 		counter += 1
-	retObj.update_xaxes(title_text='Query', rangemode = 'tozero')
-	retObj.update_yaxes(title_text='Reference', rangemode = 'tozero')
+	if chrm is not None:
+		scale_end = GRCh38_chromosome_length[int(chrm)]
+	else:
+		scale_end = GRCh38_chromosome_length[1]
+	retObj.update_xaxes(title_text='Query', range = [0, scale_end], showgrid=True, gridwidth=1)
+	retObj.update_yaxes(title_text='Reference', range = [0, scale_end], showgrid=True, gridwidth=1)
+	retObj.update_layout(title={'text': f"Chromosome {chrm}"})
 	return retObj
 
 def main():
 	parser = argparse.ArgumentParser(description='Describe dot plot of alignments in PAF files. Alignments are grouped by PAF file name. This script will show dot plot on your browser and save a picture to the file which you specify.')
 	parser.add_argument("Outputfilename", metavar='FileName', type=str, help='image file name.File name must be like fizz.png or fizz.svn. Please refer to https://plotly.com/python/static-image-export/')
 	parser.add_argument("PAFfilename", metavar='PAF', type=str, nargs='+', help='PAF file(s)')
-	parser.add_argument("--qc", metavar='Query centromere', type=str, nargs=2, help='query centromere coordinates')
+	parser.add_argument("--qc", metavar='Query_centromere', type=str, nargs=2, help='query centromere coordinates')
+	parser.add_argument("--chrm", metavar='Chromosome', type=str, help='chromosome')
 	args = parser.parse_args()
 	paf_file_names = args.PAFfilename
 	out_file_name = args.Outputfilename
 	query_centromere_breakpoint = args.qc
+	chrm = args.chrm
 	paf_instance_array = []
 	for each_filename in paf_file_names:
 		tmp_paf_instance = minimap2_paf_parser(each_filename, dsc = each_filename)
 		paf_instance_array.append(tmp_paf_instance)
 
-	fig = draw_dotplot(paf_instance_array, query_centromere_breakpoint = query_centromere_breakpoint, reference_centromere_breakpoint = None)
-	fig.show()
+	fig = draw_dotplot(paf_instance_array, query_centromere_breakpoint = query_centromere_breakpoint, reference_centromere_breakpoint = None, chrm = chrm)
+	#fig.show()
+	pio.kaleido.scope.default_width = 2400
+	pio.kaleido.scope.default_height = 1200
 	fig.write_image(out_file_name)
 
 if __name__ == "__main__":
