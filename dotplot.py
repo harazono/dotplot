@@ -1,10 +1,16 @@
 #! /usr/bin/env python3
 
+import sys
 import csv
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
 import plotly.io as pio
 import argparse
+import const
+from enum import Enum
+import pprint
+pp = pprint.PrettyPrinter(indent=2)
 
 class pafData():
 	def __init__(self, ref_chrom, ref_start, ref_end, query_chrom, query_start, query_end, cigar, rev, dsc = None, color = None):
@@ -29,6 +35,22 @@ class pafData():
 		print(f"rev: {self.rev}")
 		print(f"dsc: {self.dsc}")
 
+class ref_or_query(Enum):
+	R = 0
+	Q = 1
+
+
+class annotation_data():
+	def __init__(self, chrom, start, end, name, annotation_type, ref_or_query):
+		self.chrom = chrom
+		self.start = start
+		self.end = end
+		self.name = name
+		self.annotation_type = annotation_type
+		self.ref_or_query = ref_or_query
+	def __str__(self):
+		return f"{self.ref_or_query}\t{self.chrom}:{self.start}-{self.end}\t{self.annotation_type}\t{self.name}"
+
 
 def minimap2_paf_parser(filename:str, dsc = None):
 	paf = []
@@ -52,33 +74,45 @@ def minimap2_paf_parser(filename:str, dsc = None):
 		pass
 	return paf
 
-GRCh38_chromosome_length = {
-							1: 248956422,
-							2: 242193529,
-							3: 198295559,
-							4: 190214555,
-							5: 181538259,
-							6: 170805979,
-							7: 159345973,
-							8: 145138636,
-							9: 138394717,
-							10: 133797422,
-							11: 135086622,
-							12: 133275309,
-							13: 114364328,
-							14: 107043718,
-							15: 101991189,
-							16: 90338345,
-							17: 83257441,
-							18: 80373285,
-							19: 58617616,
-							20: 64444167,
-							21: 46709983,
-							22: 50818468
-}
+def gtf_parser(gtf_file_name, ref_or_query):
+	ret_array = []
+	with open(gtf_file_name, "r") as f:
+		for cols in csv.reader(f, delimiter='\t'):
+			if cols[0].startswith("#"):
+				continue
+			else:
+				chrom = cols[0]
+				start = int(cols[3])
+				end = int(cols[4])
+				annotation_type = cols[2]
+				name = cols[8].split(";")[0].split()[1].replace("\"", "")
+				one_gtf = annotation_data(chrom, start, end, name, annotation_type, ref_or_query)
+				ret_array.append(one_gtf)
+	return ret_array
 
-def draw_dotplot(PAFs, query_centromere_breakpoint = None, reference_centromere_breakpoint = None, chrm = None):
-	retObj = go.Figure()
+
+
+def draw_dotplot(PAFs, query_centromere_breakpoint = None, reference_centromere_breakpoint = None, chrm = None, query_annotation = None, reference_annotation = None):
+	"""
+	retObj = make_subplots(
+		rows=9, 
+		cols=1, 
+		specs=[
+			[{"rowspan": 8}],
+			[None],
+			[None],
+			[None],
+			[None],
+			[None],
+			[None],
+			[None],
+			[{}],
+		],
+	print_grid=True,
+	shared_xaxes=True,
+	vertical_spacing=0.02
+	)
+	"""
 	counter = 0
 	# # 63 6E FA -> rgba(99, 110, 250, 0.7)
 	colorList = []
@@ -91,6 +125,7 @@ def draw_dotplot(PAFs, query_centromere_breakpoint = None, reference_centromere_
 		b_dec = int(b_str, 16)
 		colorList.append(f"rgba({r_dec}, {g_dec}, {b_dec}, 0.5)")
 
+	main_line_scatter = []
 	for paf in PAFs:
 		x_points = []
 		y_points = []
@@ -102,48 +137,101 @@ def draw_dotplot(PAFs, query_centromere_breakpoint = None, reference_centromere_
 				y_points.append(one_alignment.ref_start)
 				y_points.append(one_alignment.ref_end)
 				y_points.append(None)
-			else:
+			elif one_alignment.rev == "-":
 				x_points.append(one_alignment.query_end)
 				x_points.append(one_alignment.query_start)
 				x_points.append(None)
 				y_points.append(one_alignment.ref_start)
 				y_points.append(one_alignment.ref_end)
 				y_points.append(None)
-		retObj.add_trace(go.Scattergl(x = x_points, y = y_points, line=dict(width=3, color=colorList[counter]), mode='lines', name = paf[0].dsc)) #, color=one_alignment.color
-		if query_centromere_breakpoint:
-			retObj.add_vrect(x0 = query_centromere_breakpoint[0], x1 = query_centromere_breakpoint[1], fillcolor = px.colors.qualitative.Pastel[0], opacity = 0.3, layer = "below", line_width=0)
-		if reference_centromere_breakpoint:
-			retObj.add_vrect(y0 = reference_centromere_breakpoint[0], y1 = reference_centromere_breakpoint[1], fillcolor = px.colors.qualitative.Pastel[1], opacity = 0.3, layer = "below", line_width=0)
+		tmp = go.Scattergl(x = x_points, y = y_points, line=dict(width=3, color=colorList[counter]), mode='lines', name = paf[0].dsc) #, color=one_alignment.color
+		main_line_scatter.append(tmp)
 		counter += 1
+
 	if chrm is not None:
-		scale_end = GRCh38_chromosome_length[int(chrm)]
+		scale_end = const.GRCh38_chromosome_length[int(chrm)]
 	else:
-		scale_end = GRCh38_chromosome_length[1]
-	retObj.update_xaxes(title_text='Query', range = [0, scale_end], showgrid=True, gridwidth=1)
-	retObj.update_yaxes(title_text='Reference', range = [0, scale_end], showgrid=True, gridwidth=1)
-	retObj.update_layout(title={'text': f"Chromosome {chrm}"})
-	return retObj
+		scale_end = const.GRCh38_chromosome_length[1]
+
+	query_annotation_scatter = []
+	if query_annotation:
+		x_points = []
+		y_points = []
+		name_list = []
+		for each_query_anno in query_annotation:
+			x_points.append(each_query_anno.start)
+			x_points.append(each_query_anno.end)
+			x_points.append(None)
+			y_points.append(0)
+			y_points.append(0)
+			y_points.append(None)
+			name_list.append(each_query_anno.name)
+			tmp = go.Scattergl(x = x_points, y = y_points, yaxis = "y2", line=dict(width=30, color="black"), name = each_query_anno.name, opacity=0.01, showlegend=False) #, color=one_alignment.color
+			query_annotation_scatter.append(tmp)
+
+	main_line_scatter.extend(query_annotation_scatter)
+	main_line_figure = go.Figure(data = main_line_scatter)
+
+	if query_centromere_breakpoint:
+		main_line_figure.add_vrect(x0 = query_centromere_breakpoint[0], x1 = query_centromere_breakpoint[1], fillcolor = px.colors.qualitative.Pastel[0], opacity = 0.3, layer = "above", line_width=0)
+	if reference_centromere_breakpoint:
+		main_line_figure.add_vrect(y0 = reference_centromere_breakpoint[0], y1 = reference_centromere_breakpoint[1], fillcolor = px.colors.qualitative.Pastel[1], opacity = 0.3, layer = "below", line_width=0)
+
+
+	main_line_figure.update_xaxes(title = {'text': "Query", "standoff": 1000},     zeroline = True,  range = [0, scale_end], rangemode = "tozero", showgrid = True,  gridwidth = 1, matches = 'x')
+	main_line_figure.update_yaxes(title_text = 'Reference', zeroline = True,  range = [0, scale_end], rangemode = "tozero", showgrid = True,  gridwidth = 1, scaleanchor = "x", scaleratio = 1)
+	#retObj.update_xaxes(title_text = 'Gene',      zeroline = True,  range = [0, scale_end], rangemode = "tozero", showgrid = True,  gridwidth = 1, matches = 'x')
+	#retObj.update_yaxes(title_text = ''         , zeroline = False, range = [-0.5, 0.5],    rangemode = "tozero", showgrid = False, gridwidth = 0, matches = 'y2')
+
+	main_line_figure.update_layout(
+		title = {'text': f"Chromosome {chrm}", "y": 0.95, "x": 0.5},
+		legend = {"yanchor": "top", "y": 0.99, "xanchor": "left" , "x": 0.01},
+		autosize = False,
+		width = 1200,
+		height = 1200,
+		yaxis  = {"domain": [0.05, 1]},
+		yaxis2 = {"domain": [0, 0.05]}
+		#xaxis2 = {"title": "Gene", "titlefont": {"color": "#ff7f0e"}, "tickfont": {"color": "#ff7f0e"}, "anchor": "free", "overlaying": "free", "side": "bottom", "position": 0.1}
+		)
+
+
+
+	return main_line_figure
 
 def main():
 	parser = argparse.ArgumentParser(description='Describe dot plot of alignments in PAF files. Alignments are grouped by PAF file name. This script will show dot plot on your browser and save a picture to the file which you specify.')
 	parser.add_argument("Outputfilename", metavar='FileName', type=str, help='image file name.File name must be like fizz.png or fizz.svn. Please refer to https://plotly.com/python/static-image-export/')
 	parser.add_argument("PAFfilename", metavar='PAF', type=str, nargs='+', help='PAF file(s)')
-	parser.add_argument("--qc", metavar='Query_centromere', type=str, nargs=2, help='query centromere coordinates')
-	parser.add_argument("--chrm", metavar='Chromosome', type=str, help='chromosome')
+	#parser.add_argument("--qc", metavar='Query_centromere', type=str, nargs=2, help='query centromere coordinates')
+	parser.add_argument("--chrm", metavar='Chromosome', type=int, help='chromosome')
+	parser.add_argument("--ref_anno", metavar='ref_anno', type=str, help='annotation file for reference genome')
+	parser.add_argument("--query_anno", metavar='query_anno', type=str, help='annotation file for query genome')
 	args = parser.parse_args()
 	paf_file_names = args.PAFfilename
 	out_file_name = args.Outputfilename
-	query_centromere_breakpoint = args.qc
 	chrm = args.chrm
+	query_centromere_breakpoint = chrm
+	ref_anno_file_name = args.ref_anno
+	query_anno_file_name = args.query_anno
+
+	ref_anno = None
+	query_anno = None
+	if ref_anno_file_name is not None:
+		ref_anno = gtf_parser(ref_anno_file_name, ref_or_query.R)
+		print(f"# of ref_anno: {len(ref_anno)}", file = sys.stderr)
+	if query_anno_file_name is not None:
+		query_anno = gtf_parser(query_anno_file_name, ref_or_query.Q)
+		print(f"# of query_anno: {len(query_anno)}", file = sys.stderr)
+
 	paf_instance_array = []
 	for each_filename in paf_file_names:
 		tmp_paf_instance = minimap2_paf_parser(each_filename, dsc = each_filename)
 		paf_instance_array.append(tmp_paf_instance)
 
-	fig = draw_dotplot(paf_instance_array, query_centromere_breakpoint = query_centromere_breakpoint, reference_centromere_breakpoint = None, chrm = chrm)
-	#fig.show()
+	fig = draw_dotplot(paf_instance_array, query_centromere_breakpoint = const.GRCh37_centromere_coordinates[chrm], reference_centromere_breakpoint = None, chrm = chrm, query_annotation = query_anno[:500], reference_annotation = ref_anno)
+	fig.show()
 	pio.kaleido.scope.default_width = 2400
-	pio.kaleido.scope.default_height = 1200
+	pio.kaleido.scope.default_height = 2400
 	fig.write_image(out_file_name)
 
 if __name__ == "__main__":
