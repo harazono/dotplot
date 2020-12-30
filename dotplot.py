@@ -166,8 +166,8 @@ def draw_dotplot(PAFs, query_centromere_breakpoint = None, reference_centromere_
 			y_points.append(0)
 			y_points.append(None)
 			name_list.append(each_query_anno.name)
-			tmp = go.Scattergl(x = x_points, y = y_points, yaxis = "y2", line=dict(width=30, color="black"), name = each_query_anno.name, opacity=0.01, showlegend=False) #, color=one_alignment.color
-			query_annotation_scatter.append(tmp)
+		tmp = go.Scattergl(x = x_points, y = y_points, yaxis = "y2", line=dict(width = 30, color = "black"), name = "Gene", opacity = 1, showlegend = False) #, color=one_alignment.color
+		query_annotation_scatter.append(tmp)
 
 	main_line_scatter.extend(query_annotation_scatter)
 	main_line_figure = go.Figure(data = main_line_scatter)
@@ -228,7 +228,7 @@ def main():
 		tmp_paf_instance = minimap2_paf_parser(each_filename, dsc = each_filename)
 		paf_instance_array.append(tmp_paf_instance)
 
-	fig = draw_dotplot(paf_instance_array, query_centromere_breakpoint = const.GRCh37_centromere_coordinates[chrm], reference_centromere_breakpoint = None, chrm = chrm, query_annotation = query_anno[:500], reference_annotation = ref_anno)
+	fig = draw_dotplot(paf_instance_array, query_centromere_breakpoint = const.GRCh37_centromere_coordinates[chrm], reference_centromere_breakpoint = None, chrm = chrm, query_annotation = query_anno, reference_annotation = ref_anno)
 	fig.show()
 	pio.kaleido.scope.default_width = 2400
 	pio.kaleido.scope.default_height = 2400
