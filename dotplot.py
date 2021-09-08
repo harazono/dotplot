@@ -6,13 +6,17 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import plotly.io as pio
+from plotly.validators.scatter.marker import SymbolValidator
 import argparse
-import const
 from enum import Enum
 import pprint
 pp = pprint.PrettyPrinter(indent=2)
+import re
+import json
+import gzip
 
-class pafData():
+
+class paf_data():
 	def __init__(self, ref_chrom, ref_start, ref_end, query_chrom, query_start, query_end, cigar, rev, dsc = None, color = None):
 		self.ref_chrom = ref_chrom
 		self.ref_start = ref_start
@@ -43,7 +47,7 @@ class annotation_data():
 		return f"{self.ref_or_query}\t{self.chrom}:{self.start}-{self.end}\t{self.annotation_type}\t{self.name}"
 
 def chain_parser(filename, chrom):
-	print(f"file {filename}, chrom {chrom}")
+#	print(f"file {filename}, chrom {chrom}")
 	ret_array = []
 	score = 0
 	tName = ""
@@ -66,24 +70,25 @@ def chain_parser(filename, chrom):
 				query_current_pos = int(qStart)
 			elif line != "\n":
 				block = line.strip().split()
-				ref_start = int(ref_current_pos)
-				query_start = int(query_current_pos)
+				ref_start = ref_current_pos
+				query_start = query_current_pos
 				ref_end = ref_start + int(block[0])
 				query_end = query_start + int(block[0])
-				paf_alignment_data = pafData(
-					ref_chrom = tName,
-					ref_start = ref_start,
-					ref_end = ref_end,
-					query_chrom = qName,
-					query_start = query_start,
-					query_end = query_end,
+				paf_alignment_data = paf_data(
+					query_chrom = tName,
+					query_start = ref_start,
+					query_end = ref_end,
+					ref_chrom = qName,
+					ref_start = query_start,
+					ref_end = query_end,
 					cigar = None,
 					rev = qStrand,
+					dsc = "chain"
 					)
 				ret_array.append(paf_alignment_data)
 				if len(block) == 3:
-					ref_current_pos += int(block[0]) + int(block[1])
-					query_current_pos += int(block[0]) + int(block[2])
+					ref_current_pos = ref_end + int(block[1])
+					query_current_pos = query_end + int(block[2])
 	return ret_array
 
 
@@ -95,20 +100,22 @@ def minimap2_paf_parser(filename:str, dsc = None):
 			reader = csv.reader(f, delimiter = "\t")
 			l = [row for row in reader]
 			for each_paf in l:
-				tmp_paf = pafData(
+				cigar = each_paf[-1].split(":")[-1]
+				tmp_paf = paf_data(
 						ref_chrom = each_paf[5],
 						ref_start = int(each_paf[7]),
 						ref_end = int(each_paf[8]),
 						query_chrom = each_paf[0],
 						query_start = int(each_paf[2]),
 						query_end = int(each_paf[3]),
-						cigar = None,
+						cigar = cigar,
 						rev = each_paf[4],
 						dsc = dsc)
 				paf.append(tmp_paf)
 	except:
 		pass
 	return paf
+
 
 def gtf_parser(gtf_file_name, ref_or_query):
 	ret_array = []
@@ -122,18 +129,105 @@ def gtf_parser(gtf_file_name, ref_or_query):
 				end = int(cols[4])
 				annotation_type = cols[2]
 				name = cols[8].split(";")[0].split()[1].replace("\"", "")
-				one_gtf = annotation_data(chrom, start, end, name, annotation_type, ref_or_query)
+				one_gtf = annotation_data(chrom, int(start), int(end), name, annotation_type, ref_or_query)
 				ret_array.append(one_gtf)
 	return ret_array
 
 
 
+
+def gff3_attribute_split(attribute):
+	ret_dict = {}
+	for each_item in attribute.split(";"):
+		key, val = each_item.split("=")
+		ret_dict[key] = val
+	return ret_dict
+
+
+def gff3_parser(gff3_file_name, ref_or_query):
+	return_array = []
+	try:
+		with gzip.open(gff3_file_name, "rt") as f:
+			for each_line in f:
+				if each_line.startswith("#"):
+					continue
+				seqid, source, _type, start, end, score, strand, phase, attribute = each_line.split("\t")
+				attr = gff3_attribute_split(attribute)
+				if not _type in ["biological_region", "chromosome", "supercontig", "scaffold"]:
+					name = attr.get("Name") if attr.get("Name") is not None else attr["ID"].split(":")[1]
+					return_array.append(annotation_data(seqid, int(start), int(end), name, None, ref_or_query))
+		return return_array
+
+	except gzip.BadGzipFile:
+		with open(gff3_file_name, "r") as f:
+			for each_line in f:
+				if each_line.startswith("#"):
+					continue
+				seqid, source, _type, start, end, score, strand, phase, attribute = each_line.split("\t")
+				attr = gff3_attribute_split(attribute)
+				if not _type in ["biological_region", "chromosome", "supercontig", "scaffold"]:
+					name = attr.get("Name") if attr.get("Name") is not None else attr["ID"].split(":")[1]
+					return_array.append(annotation_data(seqid, int(start), int(end), name, None, ref_or_query))
+		return return_array
+
+
+
+
+
+
+def cigar_parser(cigar_string):
+	cigar_element = re.findall(r'([0-9]+[MIDNSHPX=])', cigar_string)
+	return cigar_element
+
+def cut_alignment_at_large_indel(paf, threthold = 50):
+	rev = paf.rev
+	current_ref_pos = paf.ref_start
+	current_query_pos = paf.query_start
+
+	points = []
+	if rev == "+":
+		points.append((paf.query_start, paf.ref_start))
+	else:
+		current_query_pos = paf.query_end
+		points.append((paf.query_end, paf.ref_start))
+
+	for each_chain in cigar_parser(paf.cigar):
+		length = int(each_chain[:-1])
+		if rev == "+":
+			if each_chain[-1] == "D":# and length >= threthold:
+				current_ref_pos += length
+			elif each_chain[-1] == "I":# and length >= threthold:
+				current_query_pos += length
+			else:
+				current_query_pos += length
+				current_ref_pos += length
+		else:
+			if each_chain[-1] == "D":# and length >= threthold:
+				current_ref_pos += length
+			elif each_chain[-1] == "I":# and length >= threthold:
+				current_query_pos -= length
+			else:
+				current_query_pos -= length
+				current_ref_pos += length
+
+		points.append((current_query_pos, current_ref_pos))
+	points.append((None, None))
+	#if rev == "+":
+	#	points.append((paf.query_end, paf.ref_end))
+	#else:
+	#	points.append((paf.query_start, paf.ref_end))
+	return points
+
+
+
 def draw_dotplot(
 	PAFs, 
+	chrm,
+	const,
 	query_centromere_breakpoint = None, 
-	reference_centromere_breakpoint = None, 
-	chrm = None, 
+	reference_centromere_breakpoint = None,  
 	query_annotation = None, 
+	ref_annotation = None, 
 	reference_annotation = None
 	):
 	counter = 0
@@ -152,62 +246,102 @@ def draw_dotplot(
 	for paf in PAFs:
 		x_points = []
 		y_points = []
-		for one_alignment in paf:
-			if one_alignment.rev == "+":
-				x_points.append(one_alignment.query_start)
-				x_points.append(one_alignment.query_end)
-				x_points.append(None)
-				y_points.append(one_alignment.ref_start)
-				y_points.append(one_alignment.ref_end)
-				y_points.append(None)
-			elif one_alignment.rev == "-":
-				x_points.append(one_alignment.query_end)
-				x_points.append(one_alignment.query_start)
-				x_points.append(None)
-				y_points.append(one_alignment.ref_start)
-				y_points.append(one_alignment.ref_end)
-				y_points.append(None)
-		tmp = go.Scattergl(x = x_points, y = y_points, line=dict(width=3, color=colorList[counter]), mode='lines', name = paf[0].dsc) #, color=one_alignment.color
+		for one_alignment in paf:#ここでcigarのパーザーを呼ぶ。
+			points = cut_alignment_at_large_indel(one_alignment)
+			for i in range(len(points)):
+				x_points.append(points[i][0])
+				y_points.append(points[i][1])
+		tmp = go.Scattergl(x = x_points, y = y_points, line=dict(width=3, color=colorList[counter%24]), mode='lines', name = paf[0].dsc.split("/")[-1]) #, color=one_alignment.color
 		main_line_scatter.append(tmp)
 		counter += 1
 
-	if chrm is not None:
-		scale_end = const.GRCh38_chromosome_length[int(chrm)]
-	else:
-		scale_end = const.GRCh38_chromosome_length[1]
+
+
 
 	query_annotation_scatter = []
-	if query_annotation:
+	if query_annotation is not None:
 		x_points = []
 		y_points = []
 		name_list = []
+		count = 0
 		for each_query_anno in query_annotation:
-			x_points = []
-			y_points = []
+			if str(each_query_anno.chrom) != str(chrm):
+				continue
+			length = each_query_anno.end - each_query_anno.start
 			x_points.append(each_query_anno.start)
 			x_points.append(each_query_anno.end)
-			#x_points.append(None)
-			y_points.append(0)
-			y_points.append(0)
-			#y_points.append(None)
-			#name_list.append(each_query_anno.name)
-			tmp = go.Scattergl(
+			x_points.append(None)
+			y_points.append(count % 12)
+			y_points.append(count % 12)
+			#y_points.append(0)
+			#y_points.append(0)
+			y_points.append(None)
+			name_list.append(each_query_anno.name)
+			name_list.append("")
+			name_list.append("")
+			count += 1
+		tmp = go.Scattergl(
 				x = x_points,
 				y = y_points,
 				yaxis = "y2",
-				line = dict(width = 40, color = "black"),
+				line = dict(width = 2, color = "midnightblue"),
+				marker = dict(color = colorList),
+				marker_line_color = "midnightblue", marker_color = "midnightblue", marker_line_width = 2, marker_size = 4,
+				marker_symbol = 223,
 				name = each_query_anno.name,
-				opacity = 0.25,
+				text = name_list,
+				opacity = 0.7,
+				mode = "markers+lines",
+				textposition = "bottom center",
+				
 				showlegend = False
-				#fill='toself'
-				#fillcolor='rgba(0,100,80,0.2)',
-				#line_color='rgba(255,255,255,0)'
 				)
-			query_annotation_scatter.append(tmp)
-		#tmp = go.Scattergl(x = x_points, y = y_points, yaxis = "y2", line=dict(width = 30, color = "black"), name = "Gene", opacity = 1, showlegend = False) #, color=one_alignment.color
-		#query_annotation_scatter.append(tmp)
-
+		query_annotation_scatter.append(tmp)
 	main_line_scatter.extend(query_annotation_scatter)
+
+
+	ref_annotation_scatter = []
+	if ref_annotation is not None:
+		x_points = []
+		y_points = []
+		name_list = []
+		count = 0
+		for each_ref_anno in ref_annotation:
+			if str(each_ref_anno.chrom) != str(chrm):
+				continue
+			length = each_ref_anno.end - each_ref_anno.start
+			y_points.append(each_ref_anno.start)
+			y_points.append(each_ref_anno.end)
+			y_points.append(None)
+			x_points.append(count % 12)
+			x_points.append(count % 12)
+			#x_points.append(0)
+			#x_points.append(0)
+			x_points.append(None)
+			name_list.append(each_ref_anno.name)
+			name_list.append("")
+			name_list.append("")
+			count += 1
+		tmp = go.Scattergl(
+				x = x_points,
+				y = y_points,
+				xaxis = "x2",
+				line = dict(width = 2, color = "midnightblue"),
+				marker = dict(color = colorList),
+				marker_line_color = "midnightblue", marker_color = "midnightblue", marker_line_width = 2, marker_size = 4,
+				marker_symbol = 224,
+				name = each_ref_anno.name,
+				text = name_list,
+				opacity = 0.7,
+				mode = "markers+lines",
+				textposition = "bottom center",
+				
+				showlegend = False
+				)
+		ref_annotation_scatter.append(tmp)
+	main_line_scatter.extend(ref_annotation_scatter)
+
+
 	main_line_figure = go.Figure(data = main_line_scatter)
 
 	if query_centromere_breakpoint:
@@ -216,19 +350,20 @@ def draw_dotplot(
 		main_line_figure.add_vrect(y0 = reference_centromere_breakpoint[0], y1 = reference_centromere_breakpoint[1], fillcolor = px.colors.qualitative.Pastel[1], opacity = 0.3, layer = "below", line_width=0)
 
 
-	main_line_figure.update_xaxes(title = {'text': "Query", "standoff": 1000},     zeroline = True,  range = [0, scale_end], rangemode = "tozero", showgrid = True,  gridwidth = 1, matches = 'x')
-	main_line_figure.update_yaxes(title_text = 'Reference', zeroline = True,  range = [0, scale_end], rangemode = "tozero", showgrid = True,  gridwidth = 1, scaleanchor = "x", scaleratio = 1)
-	#retObj.update_xaxes(title_text = 'Gene',      zeroline = True,  range = [0, scale_end], rangemode = "tozero", showgrid = True,  gridwidth = 1, matches = 'x')
-	#retObj.update_yaxes(title_text = ''         , zeroline = False, range = [-0.5, 0.5],    rangemode = "tozero", showgrid = False, gridwidth = 0, matches = 'y2')
+	scale_end = const["GRCh38_chromosome_length"][str(chrm)]
+
+	main_line_figure.update_xaxes(title = {'text': "Query", "standoff": 1100}, title_font = dict(size=18), zeroline = True,  range = [0, scale_end], rangemode = "tozero", showgrid = True,  gridwidth = 1, matches = 'x', anchor = "free", position = 1)
+	main_line_figure.update_yaxes(title_text = 'Reference', zeroline = True,  range = [0, scale_end], rangemode = "tozero", showgrid = True,  gridwidth = 1, scaleanchor = "x", scaleratio = 1, autorange="reversed")
 
 	main_line_figure.update_layout(
 		title = {'text': f"Chromosome {chrm}", "y": 0.95, "x": 0.5},
-		legend = {"yanchor": "top", "y": 0.99, "xanchor": "left" , "x": 0.01},
+		legend = {"yanchor": "top", "y": 0.98, "xanchor": "right" , "x": 1.0},
 		autosize = False,
 		width = 1200,
 		height = 1200,
 		yaxis  = {"domain": [0.05, 1]},
-		yaxis2 = {"domain": [0, 0.05]}
+		yaxis2 = {"domain": [0, 0.05]},
+		hovermode = 'x unified'
 		#xaxis2 = {"title": "Gene", "titlefont": {"color": "#ff7f0e"}, "tickfont": {"color": "#ff7f0e"}, "anchor": "free", "overlaying": "free", "side": "bottom", "position": 0.1}
 		)
 
@@ -238,10 +373,9 @@ def draw_dotplot(
 
 def main():
 	parser = argparse.ArgumentParser(description='Describe dot plot of alignments in PAF files. Alignments are grouped by PAF file name. This script will show dot plot on your browser and save a picture to the file which you specify.')
-	parser.add_argument("Outputfilename", metavar='FileName', type=str, help='image file name.File name must be like fizz.png or fizz.svn. Please refer to https://plotly.com/python/static-image-export/')
+	parser.add_argument("-o", metavar='FileName', type=str, help='image file name.File name must be like fizz.png or fizz.svn. Please refer to https://plotly.com/python/static-image-export/')
+	parser.add_argument("chrm", metavar='Chromosome', type=int, help='chromosome')
 	parser.add_argument("PAFfilename", metavar='PAF', type=str, nargs='+', help='PAF file(s)')
-	#parser.add_argument("--qc", metavar='Query_centromere', type=str, nargs=2, help='query centromere coordinates')
-	parser.add_argument("--chrm", metavar='Chromosome', type=int, help='chromosome')
 	parser.add_argument("--ref_gene", metavar='ref_gene', type=str, help='gene annotation file for reference genome')
 	parser.add_argument("--query_gene", metavar='query_gene', type=str, help='gene annotation file for query genome')
 	parser.add_argument("--ref_repeat", metavar='ref_repeat', type=str, help='repeat annotation file for reference genome')
@@ -249,7 +383,7 @@ def main():
 	parser.add_argument("--chain", metavar='chain', type=str, help='hg19ToHg38')
 	args = parser.parse_args()
 	paf_file_names = args.PAFfilename
-	out_file_name = args.Outputfilename
+	out_file_name = args.o
 	chrm = args.chrm
 	query_centromere_breakpoint = chrm
 	ref_gene_file_name = args.ref_gene
@@ -257,11 +391,19 @@ def main():
 
 	ref_gene = None
 	query_gene = None
+
 	if ref_gene_file_name is not None:
-		ref_gene = gtf_parser(ref_gene_file_name, ref_or_query.R)
+		if ".gtf" in ref_gene_file_name:
+			ref_gene = gtf_parser(ref_gene_file_name, ref_or_query.R)
+		elif ".gff3" in ref_gene_file_name:
+			ref_gene = gff3_parser(ref_gene_file_name, ref_or_query.R)
 		print(f"# of ref_anno: {len(ref_gene)}", file = sys.stderr)
+
 	if query_gene_file_name is not None:
-		query_gene = gtf_parser(query_gene_file_name, ref_or_query.Q)
+		if ".gtf" in query_gene_file_name:
+			query_gene = gtf_parser(query_gene_file_name, ref_or_query.Q)
+		elif ".gff3" in query_gene_file_name:
+			query_gene = gff3_parser(query_gene_file_name, ref_or_query.Q)
 		print(f"# of query_anno: {len(query_gene)}", file = sys.stderr)
 
 	paf_instance_array = []
@@ -269,18 +411,30 @@ def main():
 		tmp_paf_instance = minimap2_paf_parser(each_filename, dsc = each_filename)
 		paf_instance_array.append(tmp_paf_instance)
 
-	chain_paf_format_data = chain_parser(args.chain, chrm)
-	only_designated_paf = []
-	for each_chain in chain_paf_format_data:
-		if each_chain.ref_chrom == f"chr{chrm}" and each_chain.query_chrom == f"chr{chrm}":
-			only_designated_paf.append(each_chain)
-	print(len(only_designated_paf))
-	fig = draw_dotplot([only_designated_paf])
-	#fig = draw_dotplot(paf_instance_array, query_centromere_breakpoint = const.GRCh37_centromere_coordinates[chrm], reference_centromere_breakpoint = None, chrm = chrm, query_annotation = query_gene, reference_annotation = ref_gene)
-	fig.show()
+	if args.chain is not None:
+		chain_paf_format_data = chain_parser(args.chain, chrm)
+		only_designated_paf = []
+		for each_chain in chain_paf_format_data:
+			if each_chain.ref_chrom == f"chr{chrm}" and each_chain.query_chrom == f"chr{chrm}":
+				only_designated_paf.append(each_chain)
+		paf_instance_array.extend([only_designated_paf])
+		#print(str(only_designated_paf[0]))
+		#print(str(only_designated_paf[1]))
+		#sys.exit(0)
+
+	const = {}
+	with open("const.json", "r") as f:
+		const = json.load(f)
+
+	fig = draw_dotplot(paf_instance_array, chrm, const, query_annotation = query_gene, ref_annotation = ref_gene)
+	#fig = draw_dotplot(paf_instance_array, chrm, const, reference_centromere_breakpoint = None, query_annotation = query_gene, reference_annotation = ref_gene)
 	pio.kaleido.scope.default_width = 2400
 	pio.kaleido.scope.default_height = 2400
-	#fig.write_image(out_file_name)
+	if out_file_name is not None:
+		fig.write_image(out_file_name)
+	else:
+		fig.show()
+
 
 if __name__ == "__main__":
 	main()
