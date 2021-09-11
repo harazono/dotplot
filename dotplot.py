@@ -74,6 +74,7 @@ def chain_parser(filename, chrom):
 				query_start = query_current_pos
 				ref_end = ref_start + int(block[0])
 				query_end = query_start + int(block[0])
+				
 				paf_alignment_data = paf_data(
 					query_chrom = tName,
 					query_start = ref_start,
@@ -81,10 +82,24 @@ def chain_parser(filename, chrom):
 					ref_chrom = qName,
 					ref_start = query_start,
 					ref_end = query_end,
-					cigar = None,
+					cigar = f"{query_end - query_start}M",
 					rev = qStrand,
-					dsc = "chain"
+					dsc = filename
 					)
+				"""
+				paf_alignment_data = paf_data(
+					query_chrom = qName,
+					query_start = query_start,
+					query_end = query_end,
+					ref_chrom = tName,
+					ref_start = ref_start,
+					ref_end = ref_end,
+					cigar = f"{query_end - query_start}M",
+					rev = tStrand,
+					dsc = filename
+					)
+				"""
+				assert(query_end - query_start == ref_end - ref_start), "chain file reports different length between reference and query"
 				ret_array.append(paf_alignment_data)
 				if len(block) == 3:
 					ref_current_pos = ref_end + int(block[1])
@@ -154,8 +169,10 @@ def gff3_parser(gff3_file_name, ref_or_query):
 				seqid, source, _type, start, end, score, strand, phase, attribute = each_line.split("\t")
 				attr = gff3_attribute_split(attribute)
 				if not _type in ["biological_region", "chromosome", "supercontig", "scaffold"]:
-					name = attr.get("Name") if attr.get("Name") is not None else attr["ID"].split(":")[1]
-					return_array.append(annotation_data(seqid, int(start), int(end), name, None, ref_or_query))
+					name = attr.get("Name")
+					_id = attr["ID"].split(":")[1]
+					text = f"{_id}({str(name)})"
+					return_array.append(annotation_data(seqid, int(start), int(end), text, None, ref_or_query))
 		return return_array
 
 	except gzip.BadGzipFile:
@@ -166,8 +183,10 @@ def gff3_parser(gff3_file_name, ref_or_query):
 				seqid, source, _type, start, end, score, strand, phase, attribute = each_line.split("\t")
 				attr = gff3_attribute_split(attribute)
 				if not _type in ["biological_region", "chromosome", "supercontig", "scaffold"]:
-					name = attr.get("Name") if attr.get("Name") is not None else attr["ID"].split(":")[1]
-					return_array.append(annotation_data(seqid, int(start), int(end), name, None, ref_or_query))
+					name = attr.get("Name")
+					_id = attr["ID"].split(":")[1]
+					text = f"{_id}({str(name)})"
+					return_array.append(annotation_data(seqid, int(start), int(end), text, None, ref_or_query))
 		return return_array
 
 
@@ -190,6 +209,7 @@ def cut_alignment_at_large_indel(paf, threthold = 50):
 	else:
 		current_query_pos = paf.query_end
 		points.append((paf.query_end, paf.ref_start))
+
 
 	for each_chain in cigar_parser(paf.cigar):
 		length = int(each_chain[:-1])
@@ -251,7 +271,13 @@ def draw_dotplot(
 			for i in range(len(points)):
 				x_points.append(points[i][0])
 				y_points.append(points[i][1])
-		tmp = go.Scattergl(x = x_points, y = y_points, line=dict(width=3, color=colorList[counter%24]), mode='lines', name = paf[0].dsc.split("/")[-1]) #, color=one_alignment.color
+		tmp = go.Scattergl(
+			x = x_points,
+			y = y_points, 
+			line=dict(width=3,color=colorList[counter % 24]),
+			mode='lines',
+			name = paf[0].dsc.split("/")[-1]
+		) #, color=one_alignment.color
 		main_line_scatter.append(tmp)
 		counter += 1
 
@@ -277,7 +303,7 @@ def draw_dotplot(
 			#y_points.append(0)
 			y_points.append(None)
 			name_list.append(each_query_anno.name)
-			name_list.append("")
+			name_list.append(each_query_anno.name)
 			name_list.append("")
 			count += 1
 		tmp = go.Scattergl(
@@ -288,7 +314,7 @@ def draw_dotplot(
 				marker = dict(color = colorList),
 				marker_line_color = "midnightblue", marker_color = "midnightblue", marker_line_width = 2, marker_size = 4,
 				marker_symbol = 223,
-				name = each_query_anno.name,
+				name = "query annotation",
 				text = name_list,
 				opacity = 0.7,
 				mode = "markers+lines",
@@ -319,7 +345,7 @@ def draw_dotplot(
 			#x_points.append(0)
 			x_points.append(None)
 			name_list.append(each_ref_anno.name)
-			name_list.append("")
+			name_list.append(each_ref_anno.name)
 			name_list.append("")
 			count += 1
 		tmp = go.Scattergl(
@@ -363,7 +389,7 @@ def draw_dotplot(
 		height = 1200,
 		yaxis  = {"domain": [0.05, 1]},
 		yaxis2 = {"domain": [0, 0.05]},
-		hovermode = 'x unified'
+		hovermode = 'x'
 		#xaxis2 = {"title": "Gene", "titlefont": {"color": "#ff7f0e"}, "tickfont": {"color": "#ff7f0e"}, "anchor": "free", "overlaying": "free", "side": "bottom", "position": 0.1}
 		)
 
@@ -426,7 +452,9 @@ def main():
 	with open("const.json", "r") as f:
 		const = json.load(f)
 
-	fig = draw_dotplot(paf_instance_array, chrm, const, query_annotation = query_gene, ref_annotation = ref_gene)
+	#for i in range(len(query_gene)):
+	#	print(query_gene[i])
+	fig = draw_dotplot(paf_instance_array, chrm, const, query_annotation = query_gene, ref_annotation = None)
 	#fig = draw_dotplot(paf_instance_array, chrm, const, reference_centromere_breakpoint = None, query_annotation = query_gene, reference_annotation = ref_gene)
 	pio.kaleido.scope.default_width = 2400
 	pio.kaleido.scope.default_height = 2400
