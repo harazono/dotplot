@@ -46,8 +46,7 @@ class annotation_data():
 	def __str__(self):
 		return f"{self.ref_or_query}\t{self.chrom}:{self.start}-{self.end}\t{self.annotation_type}\t{self.name}"
 
-def chain_parser(filename, chrom):
-#	print(f"file {filename}, chrom {chrom}")
+def chain_parser(filename, switchflag = False):
 	ret_array = []
 	score = 0
 	tName = ""
@@ -74,31 +73,32 @@ def chain_parser(filename, chrom):
 				query_start = query_current_pos
 				ref_end = ref_start + int(block[0])
 				query_end = query_start + int(block[0])
+				paf_alignment_data = None
+				if switchflag == False:
+					paf_alignment_data = paf_data(
+						query_chrom = tName,
+						query_start = ref_start,
+						query_end = ref_end,
+						ref_chrom = qName,
+						ref_start = query_start,
+						ref_end = query_end,
+						cigar = f"{query_end - query_start}M",
+						rev = qStrand,
+						dsc = filename
+					)
+				else:
+					paf_alignment_data = paf_data(
+						query_chrom = qName,
+						query_start = query_start,
+						query_end = query_end,
+						ref_chrom = tName,
+						ref_start = ref_start,
+						ref_end = ref_end,
+						cigar = f"{query_end - query_start}M",
+						rev = tStrand,
+						dsc = filename
+					)
 				
-				paf_alignment_data = paf_data(
-					query_chrom = tName,
-					query_start = ref_start,
-					query_end = ref_end,
-					ref_chrom = qName,
-					ref_start = query_start,
-					ref_end = query_end,
-					cigar = f"{query_end - query_start}M",
-					rev = qStrand,
-					dsc = filename
-					)
-				"""
-				paf_alignment_data = paf_data(
-					query_chrom = qName,
-					query_start = query_start,
-					query_end = query_end,
-					ref_chrom = tName,
-					ref_start = ref_start,
-					ref_end = ref_end,
-					cigar = f"{query_end - query_start}M",
-					rev = tStrand,
-					dsc = filename
-					)
-				"""
 				assert(query_end - query_start == ref_end - ref_start), "chain file reports different length between reference and query"
 				ret_array.append(paf_alignment_data)
 				if len(block) == 3:
@@ -407,6 +407,7 @@ def main():
 	parser.add_argument("--ref_repeat", metavar='ref_repeat', type=str, help='repeat annotation file for reference genome')
 	parser.add_argument("--query_repeat", metavar='query_repeat', type=str, help='repeat annotation file for query genome')
 	parser.add_argument("--chain", metavar='chain', type=str, help='hg19ToHg38')
+	parser.add_argument("--sf", action='store_true', help='if you want to switch ref/query in chain file, set this flag')
 	args = parser.parse_args()
 	paf_file_names = args.PAFfilename
 	out_file_name = args.o
@@ -414,7 +415,7 @@ def main():
 	query_centromere_breakpoint = chrm
 	ref_gene_file_name = args.ref_gene
 	query_gene_file_name = args.query_gene
-
+	switchflag = args.sf
 	ref_gene = None
 	query_gene = None
 
@@ -438,7 +439,7 @@ def main():
 		paf_instance_array.append(tmp_paf_instance)
 
 	if args.chain is not None:
-		chain_paf_format_data = chain_parser(args.chain, chrm)
+		chain_paf_format_data = chain_parser(args.chain, switchflag = switchflag)
 		only_designated_paf = []
 		for each_chain in chain_paf_format_data:
 			if each_chain.ref_chrom == f"chr{chrm}" and each_chain.query_chrom == f"chr{chrm}":
