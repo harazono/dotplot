@@ -240,6 +240,7 @@ def cut_alignment_at_large_indel(paf, threthold = 50):
 
 
 
+
 def draw_dotplot(
 	PAFs, 
 	chrm,
