@@ -457,8 +457,8 @@ def main():
 
 	#fig = draw_dotplot(paf_instance_array, chrm, const, query_annotation = query_gene, ref_annotation = None)
 	fig = draw_dotplot(paf_instance_array, chrm, const, reference_centromere_breakpoint = None, query_annotation = query_gene, reference_annotation = ref_gene)
-	pio.kaleido.scope.default_width = 2400
-	pio.kaleido.scope.default_height = 2400
+	#pio.kaleido.scope.default_width = 2400
+	#pio.kaleido.scope.default_height = 2400
 	if out_file_name is not None:
 		fig.write_image(out_file_name)
 	else:
