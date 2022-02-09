@@ -385,7 +385,7 @@ def main():
 	fig.update_layout(height=600, width=2000, title_text="上が38")
 	fig.update_yaxes(fixedrange=True, visible=False)
 
-	fig.update_xaxes(visible=False)
+	#fig.update_xaxes(visible=False)
 
 
 	fig.show()
