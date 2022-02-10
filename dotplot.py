@@ -116,7 +116,10 @@ def minimap2_paf_parser(filename:str, dsc = None):
 			reader = csv.reader(f, delimiter = "\t")
 			l = [row for row in reader]
 			for each_paf in l:
-				cigar = each_paf[-1].split(":")[-1]
+				cigar = str(int(each_paf[3]) - int(each_paf[2])) + "M"
+				if each_paf[-1].split(":")[0].strip() == "cg":
+					cigar = each_paf[-1].split(":")[-1]
+
 				tmp_paf = paf_data(
 						ref_chrom = each_paf[5],
 						ref_start = int(each_paf[7]),
@@ -264,11 +267,13 @@ def draw_dotplot(
 		b_dec = int(b_str, 16)
 		colorList.append(f"rgba({r_dec}, {g_dec}, {b_dec}, 0.5)")
 
+	scale_end =10
 	main_line_scatter = []
 	for paf in PAFs:
 		x_points = []
 		y_points = []
 		for one_alignment in paf:#ここでcigarのパーザーを呼ぶ。
+			#scale_end = max(scale_end, one_alignment.ref_start, one_alignment.ref_end, one_alignment.query_start, one_alignment.query_end)
 			points = cut_alignment_at_large_indel(one_alignment)
 			for i in range(len(points)):
 				x_points.append(points[i][0])
@@ -377,8 +382,8 @@ def draw_dotplot(
 	if reference_centromere_breakpoint:
 		main_line_figure.add_vrect(y0 = reference_centromere_breakpoint[0], y1 = reference_centromere_breakpoint[1], fillcolor = px.colors.qualitative.Pastel[1], opacity = 0.3, layer = "below", line_width=0)
 
-
-	scale_end = const["GRCh38_chromosome_length"][str(chrm)]
+	if chrm:
+		scale_end = const["GRCh38_chromosome_length"][str(chrm)]
 
 	main_line_figure.update_xaxes(title = {'text': "Query", "standoff": 1100}, title_font = dict(size=18), zeroline = True,  range = [0, scale_end], rangemode = "tozero", showgrid = True,  gridwidth = 1, matches = 'x', anchor = "free", position = 1)
 	main_line_figure.update_yaxes(title_text = 'Reference', zeroline = True,  range = [0, scale_end], rangemode = "tozero", showgrid = True,  gridwidth = 1, scaleanchor = "x", scaleratio = 1, autorange="reversed")
@@ -401,9 +406,9 @@ def draw_dotplot(
 
 def main():
 	parser = argparse.ArgumentParser(description='Describe dot plot of alignments in PAF files. Alignments are grouped by PAF file name. This script will show dot plot on your browser and save a picture to the file which you specify.')
-	parser.add_argument("-o", metavar='FileName', type=str, help='image file name.File name must be like fizz.png or fizz.svn. Please refer to https://plotly.com/python/static-image-export/')
-	parser.add_argument("chrm", metavar='Chromosome', type=int, help='chromosome')
 	parser.add_argument("PAFfilename", metavar='PAF', type=str, nargs='+', help='PAF file(s)')
+	parser.add_argument("-o", metavar='FileName', type=str, help='image file name.File name must be like fizz.png or fizz.svn. Please refer to https://plotly.com/python/static-image-export/')
+	parser.add_argument("-c", metavar='Chromosome', type=int, help='chromosome')
 	parser.add_argument("--ref_gene", metavar='ref_gene', type=str, help='gene annotation file for reference genome')
 	parser.add_argument("--query_gene", metavar='query_gene', type=str, help='gene annotation file for query genome')
 	parser.add_argument("--ref_repeat", metavar='ref_repeat', type=str, help='repeat annotation file for reference genome')
