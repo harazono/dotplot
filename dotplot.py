@@ -418,7 +418,7 @@ def main():
 	args = parser.parse_args()
 	paf_file_names = args.PAFfilename
 	out_file_name = args.o
-	chrm = args.chrm
+	chrm = args.c
 	query_centromere_breakpoint = chrm
 	ref_gene_file_name = args.ref_gene
 	query_gene_file_name = args.query_gene
